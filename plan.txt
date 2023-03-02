@@ -1,0 +1,35 @@
+create a chat messaging server between several clients through a socket server on the client/server architecture
+
+//server code
+
+1_registration
+    generate id
+    store in a file
+    open the "id" file and retrieve the last id and increment and assign to the new client
+2_SEND
+    a client must be able to send a message to another client
+    list all clients registered on the server
+    select a customer
+    establish the connection with the two clients
+    send a message
+    keyword end or stop the service
+  
+3_READ
+a client must be able to read his messages thanks to his id
+
+
+4_QUIT
+leave an option
+
+-------------------------------------------------- --------------------------
+
+//customer code
+
+1_ the client makes the registration request to the server and receives his id in id format which he stores by entering his name
+
+2_ the client makes the request to the server to "send" a message to a client to the server thanks to the id of the second client
+
+3_ user read his messages | we display the contents of the file associated with the customer's id
+
+4_ quit end and stop
+
