@@ -1,0 +1,9 @@
+# Compiled binaries
+server
+client
+*.o
+*.out
+a.out
+
+# Runtime state
+ids.txt
