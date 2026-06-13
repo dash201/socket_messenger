@@ -1,9 +1,8 @@
 # Socket Messenger
 
-A TCP **client/server in C**, built on BSD sockets. The server handles multiple
-clients concurrently with a process-per-client model (`fork`) and speaks a small
-text protocol; the client offers a menu-driven interface with a working user
-registration flow.
+A client/server chat messenger written in **C**, built on BSD sockets over TCP.
+It ships in two implementations of the same system: a lightweight process-based
+server and a concurrent, MySQL-backed server.
 
 🇬🇧 [English](#english) · 🇫🇷 [Français](#français)
 
@@ -13,31 +12,29 @@ registration flow.
 
 ### Overview
 
-A command-line client/server application over TCP. The server accepts several
-clients at once — one child process per client via `fork` — and exposes a simple
-protocol keyed on a command word. The implemented command, `INS`, registers a
-user and assigns them a unique, persistent id.
+A command-line chat system where clients connect to a central server to
+register, log in, list connected users, and exchange messages. Two server
+implementations share the same protocol idea but use different concurrency and
+persistence models:
+
+| Version | Folder | Concurrency | Persistence | Highlights |
+|---------|--------|-------------|-------------|------------|
+| **fork** | [`v1-fork/`](v1-fork/) | One child process per client (`fork`) | File-backed id counter | Minimal, readable reference of the socket lifecycle and a request/response protocol |
+| **threaded + MySQL** | [`v2-Pthread/`](v2-Pthread/) | One POSIX thread per client (`pthread`) | MySQL (users + messages) | Register, login, list users, store-and-forward messaging, message reading |
 
 ### Architecture
 
-```
-                 fork()                 fork()
-   ┌────────┐   ─────────►  ┌────────┐ ─────────► ┌────────┐
-   │ server │  accept loop  │ child  │            │ child  │
-   │ (main) │ ────────────► │ client │   ...      │ client │
-   └────────┘               └────────┘            └────────┘
-```
+**fork version** — `socket → bind → listen → accept`, then one `fork` per
+client. The parent keeps accepting; each child handles a single client until it
+disconnects. `SIGCHLD` is ignored so finished children are reaped automatically.
 
-- `socket → bind → listen → accept`, then one `fork` per client.
-- The parent keeps accepting connections; each child handles a single client
-  until it disconnects.
-- `SIGCHLD` is ignored so finished children are reaped automatically (no zombies).
-- Unique ids come from a file-backed counter — necessary because, under `fork`,
-  children don't share memory, so a file is the only state common to all of them.
+**threaded version** — a single process accepts connections and spawns one
+`pthread` per client, each with its own MySQL connection. Users and messages are
+persisted, so state survives across connections: a user logs back in with their
+id, and messages are stored and delivered when the recipient runs `READ`.
 
-### Protocol
-
-A small text protocol. The registration handshake:
+**Protocol** — a small text protocol keyed on a command word
+(`INS`, `CONN`, `LIST`, `SEND`, `READ`, `EXIT`). Registration handshake:
 
 ```
 client → INS
@@ -48,21 +45,44 @@ server → <id>
 
 ### Build & run
 
+**fork version**
+
 ```bash
 cd v1-fork
 gcc TPserverfork1.c -o server
 gcc TPclient.c      -o client
-
 ./server 5000      # terminal 1
-./client 5000      # terminal 2  (connects to 127.0.0.1)
+./client 5000      # terminal 2
 ```
 
-> POSIX only (Linux / WSL / macOS): relies on `fork()` and BSD sockets. On
-> Windows, run it inside WSL.
+**threaded + MySQL version**
+
+```bash
+cd v2-Pthread
+mysql -u <user> -p socket < socket.sql              # create the schema
+gcc TPserverfork.c -o server -lpthread -lmysqlclient
+gcc TPclient.c     -o client
+
+DB_USER=<user> DB_PASS=<pass> ./server 5000          # terminal 1
+./client 5000                                        # terminal 2
+```
+
+> POSIX only (Linux / WSL / macOS): relies on `fork()`, `pthread` and BSD
+> sockets. On Windows, run it inside WSL. The threaded version also needs the
+> MySQL client library (`libmysqlclient-dev`). DB credentials are read from the
+> environment (`DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME`).
+
+### Security
+
+The threaded version applies several security practices — prepared statements
+against SQL injection, integer validation of ids, environment-based credentials,
+and bounds-checked buffers. See **[SECURITY.md](SECURITY.md)** for the full note,
+including the threat model and limitations.
 
 ### Tech
 
-C · BSD sockets · TCP client/server IPC · processes (`fork`).
+C · BSD sockets · TCP client/server IPC · processes (`fork`) · POSIX threads
+(`pthread`) · MySQL.
 
 ---
 
@@ -70,56 +90,76 @@ C · BSD sockets · TCP client/server IPC · processes (`fork`).
 
 ### Présentation
 
-Une application client/serveur en ligne de commande au-dessus de TCP. Le serveur
-accepte plusieurs clients simultanément — un processus fils par client via
-`fork` — et expose un protocole simple basé sur un mot-clé de commande. La
-commande implémentée, `INS`, inscrit un utilisateur et lui attribue un
-identifiant unique et persistant.
+Un système de messagerie en ligne de commande : des clients se connectent à un
+serveur central pour s'inscrire, se connecter, lister les utilisateurs connectés
+et échanger des messages. Deux implémentations du serveur partagent la même idée
+de protocole mais utilisent des modèles de concurrence et de persistance
+différents :
+
+| Version | Dossier | Concurrence | Persistance | Points clés |
+|---------|---------|-------------|-------------|-------------|
+| **fork** | [`v1-fork/`](v1-fork/) | Un processus fils par client (`fork`) | Compteur d'id dans un fichier | Référence minimale et lisible du cycle de vie d'un socket et d'un protocole requête/réponse |
+| **threads + MySQL** | [`v2-Pthread/`](v2-Pthread/) | Un thread POSIX par client (`pthread`) | MySQL (utilisateurs + messages) | Inscription, connexion, liste, messagerie « stockage et remise », lecture des messages |
 
 ### Architecture
 
-```
-                 fork()                 fork()
-   ┌────────┐   ─────────►  ┌────────┐ ─────────► ┌────────┐
-   │ serveur│  boucle accept│  fils  │            │  fils  │
-   │ (main) │ ────────────► │ client │   ...      │ client │
-   └────────┘               └────────┘            └────────┘
-```
+**Version fork** — `socket → bind → listen → accept`, puis un `fork` par client.
+Le parent continue d'accepter ; chaque fils gère un seul client jusqu'à sa
+déconnexion. `SIGCHLD` est ignoré pour récupérer automatiquement les fils.
 
-- `socket → bind → listen → accept`, puis un `fork` par client.
-- Le parent continue d'accepter les connexions ; chaque fils gère un seul client
-  jusqu'à sa déconnexion.
-- `SIGCHLD` est ignoré pour récupérer automatiquement les fils terminés (pas de
-  zombies).
-- Les identifiants uniques proviennent d'un compteur stocké dans un fichier —
-  nécessaire car, avec `fork`, les fils ne partagent pas leur mémoire : le
-  fichier est le seul état commun à toutes les connexions.
+**Version threads** — un processus unique accepte les connexions et crée un
+`pthread` par client, chacun avec sa propre connexion MySQL. Les utilisateurs et
+les messages sont persistés : l'état survit aux connexions, un utilisateur se
+reconnecte avec son id, et les messages sont stockés puis remis quand le
+destinataire lance `READ`.
 
-### Protocole
-
-Un petit protocole texte. La poignée de main d'inscription :
+**Protocole** — un petit protocole texte basé sur un mot-clé de commande
+(`INS`, `CONN`, `LIST`, `SEND`, `READ`, `EXIT`). Poignée de main d'inscription :
 
 ```
 client → INS
-serveur → Enter your username
+serveur → Entrez votre pseudo
 client → <pseudo>
 serveur → <id>
 ```
 
 ### Compilation & exécution
 
+**Version fork**
+
 ```bash
 cd v1-fork
 gcc TPserverfork1.c -o server
 gcc TPclient.c      -o client
-
 ./server 5000      # terminal 1
-./client 5000      # terminal 2  (se connecte à 127.0.0.1)
+./client 5000      # terminal 2
 ```
 
-> POSIX uniquement (Linux / WSL / macOS) : utilise `fork()` et les sockets BSD.
-> Sous Windows, lancer dans WSL.
+**Version threads + MySQL**
+
+```bash
+cd v2-Pthread
+mysql -u <user> -p socket < socket.sql              # créer le schéma
+gcc TPserverfork.c -o server -lpthread -lmysqlclient
+gcc TPclient.c     -o client
+
+DB_USER=<user> DB_PASS=<pass> ./server 5000          # terminal 1
+./client 5000                                        # terminal 2
+```
+
+> POSIX uniquement (Linux / WSL / macOS) : utilise `fork()`, `pthread` et les
+> sockets BSD. Sous Windows, lancer dans WSL. La version threads requiert aussi
+> la bibliothèque cliente MySQL (`libmysqlclient-dev`). Les identifiants de la
+> base sont lus dans l'environnement (`DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME`).
+
+### Sécurité
+
+La version threads applique plusieurs bonnes pratiques — requêtes préparées
+contre l'injection SQL, validation entière des id, identifiants via
+l'environnement, et buffers bornés. Voir **[SECURITY.md](SECURITY.md)** pour la
+note complète, avec le modèle de menace et les limites.
 
 ### Technologies
 
-C · sockets BSD · communication client/serveur TCP · processus (`fork`).
+C · sockets BSD · communication client/serveur TCP · processus (`fork`) ·
+threads POSIX (`pthread`) · MySQL.
